@@ -24,6 +24,12 @@ llm = [
     "openai>=1.0.0",
     "google-genai>=0.7.0",
 ]
+engram = [
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "transformers>=4.30.0",
+    "sympy>=1.12",
+]
 dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
