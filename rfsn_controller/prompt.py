@@ -104,6 +104,7 @@ def build_model_input(state: Dict[str, Any]) -> str:
             f"REPO_TREE:\n{_truncate(state['repo_tree'], 20000)}\n\n",
             f"CONSTRAINTS:\n{state['constraints']}\n\n",
             f"FILES:\n{state['files_block']}\n",
+            "\nIMPORTANT: Do not loop. If you have already read a file, do not read it again unless you changed it. If you have gathered enough evidence, propose a patch immediately.\n",
         ]
     )
 

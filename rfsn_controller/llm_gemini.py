@@ -326,3 +326,114 @@ def call_model(model_input: str, temperature: float = 0.0) -> dict:
         return data
     # fallback: treat as patch with empty diff if parsing failed
     return {"mode": "patch", "diff": ""}
+
+
+async def call_model_async(model_input: str, temperature: float = 0.0) -> dict:
+    """Async version of call_model."""
+    import time
+    import asyncio
+    
+    genai, types = _ensure_genai_imported()
+    output_schema = _build_schemas()
+
+    cfg = types.GenerateContentConfig(
+        temperature=temperature,
+        system_instruction=SYSTEM,
+        response_mime_type="application/json",
+        response_schema=output_schema,
+    )
+    
+    max_retries = 3
+    base_delay = 1.0
+    last_exception = None
+    
+    for attempt in range(max_retries + 1):
+        start_time = time.time()
+        try:
+            # correct async call for google-genai v1 sdk
+            resp = await client().aio.models.generate_content(
+                model=MODEL,
+                contents=model_input,
+                config=cfg,
+            )
+            
+            data = getattr(resp, "parsed", None)
+            
+            latency_sec = time.time() - start_time
+            try:
+                from .telemetry import track_llm_call
+                # Estimate tokens (Gemini usage metadata might differ)
+                prompt_tokens = 0
+                completion_tokens = 0
+                if hasattr(resp, "usage_metadata"):
+                    prompt_tokens = getattr(resp.usage_metadata, "prompt_token_count", 0)
+                    completion_tokens = getattr(resp.usage_metadata, "candidates_token_count", 0)
+                
+                track_llm_call(
+                    model=MODEL,
+                    status="success",
+                    latency_sec=latency_sec,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
+            except ImportError:
+                pass
+
+            if isinstance(data, dict) and "mode" in data:
+                return data
+            return {"mode": "patch", "diff": ""}
+            
+        except Exception as e:
+            last_exception = e
+            latency_sec = time.time() - start_time
+            try:
+                from .telemetry import track_llm_call
+                track_llm_call(
+                    model=MODEL,
+                    status="error",
+                    latency_sec=latency_sec,
+                )
+            except ImportError:
+                pass
+            
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                await asyncio.sleep(delay)
+            else:
+                raise last_exception from last_exception
+                
+    raise last_exception if last_exception else RuntimeError("Unknown error")
+
+
+async def call_model_streaming(model_input: str, temperature: float = 0.0):
+    """Call the Gemini model with streaming response.
+    
+    Yields:
+        Chunks of the response content as they arrive.
+    """
+    genai, types = _ensure_genai_imported()
+    output_schema = _build_schemas()
+
+    cfg = types.GenerateContentConfig(
+        temperature=temperature,
+        system_instruction=SYSTEM,
+        response_mime_type="application/json",
+        response_schema=output_schema,
+    )
+    
+    try:
+        # correct async call for google-genai v1 sdk with streaming
+        # Note: aio.models.generate_content(stream=True) returns an async iterator
+        async for chunk in await client().aio.models.generate_content(
+            model=MODEL,
+            contents=model_input,
+            config=cfg,
+            stream=True
+        ):
+            # Gemini chunks might contain parts or text
+            if chunk.text:
+                yield chunk.text
+            
+    except Exception as e:
+        raise e
+

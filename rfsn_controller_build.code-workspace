@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"name": "rfsn_controller_build",
+			"path": "."
+		},
+		{
+			"path": "../firecracker-main"
+		},
+		{
+			"path": "../E2B-main"
+		}
+	],
+	"settings": {}
+}

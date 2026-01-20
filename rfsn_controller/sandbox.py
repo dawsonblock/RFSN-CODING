@@ -16,6 +16,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from itertools import count
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .command_allowlist import is_command_allowed
@@ -44,6 +45,34 @@ class Sandbox:
 
 _SANDBOX_COUNTER = count(1)
 _WORKTREE_COUNTER_LOCK = threading.Lock()
+
+
+def _resolve_path(sb: Sandbox, path: str) -> str:
+    """Resolve and validate a path to ensure it's within the sandbox repo.
+    
+    Args:
+        sb: The sandbox instance.
+        path: Relative path to resolve.
+        
+    Returns:
+        Absolute resolved path string.
+        
+    Raises:
+        ValueError: If the path escapes the sandbox root.
+    """
+    # Base is the repo directory
+    base = Path(sb.repo_dir).resolve()
+    # Resolve the full target path
+    # Handle absolute paths that are actually inside the repo (e.g. from previous resolves)
+    if os.path.isabs(path):
+        target = Path(path).resolve()
+    else:
+        target = (base / path).resolve()
+        
+    # Check if target is relative to base
+    if not target.is_relative_to(base):
+         raise ValueError(f"Security Violation: Path traversal attempt blocked: {path}")
+    return str(target)
 
 
 def _run(
@@ -92,11 +121,11 @@ def _run(
             )
 
     # Remove secret API keys from the environment to prevent accidental leakage to subprocesses
+    # Env Allowlist: Only pass safe variables to the subprocess
+    # Prevents sensitive credentials (AWS, KUBE, etc.) from leaking
+    ALLOWED_ENV_VARS = {"PATH", "HOME", "LANG", "PYTHONPATH"}
     safe_env = {
-        k: v
-        for k, v in os.environ.items()
-        if k.upper()
-        not in {"DEEPSEEK_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"}
+        k: v for k, v in os.environ.items() if k in ALLOWED_ENV_VARS
     }
     p = subprocess.run(
         cmd_list,
@@ -329,8 +358,11 @@ def read_file(
     Returns:
         Dictionary with ok status, content, and path.
     """
-    path = path.lstrip("./").replace("\\", "/")
-    full_path = os.path.join(sb.repo_dir, path)
+
+    try:
+        full_path = _resolve_path(sb, path)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
     
     # Try smart file cache first (better LRU eviction)
     if use_cache:
@@ -795,11 +827,10 @@ def docker_run(
         docker_cmd.extend([docker_image, "sh", "-c", cmd])
 
         # Remove secret API keys from the environment to prevent leakage to Docker
+        # Env Allowlist: Only pass safe variables to Docker
+        ALLOWED_ENV_VARS = {"PATH", "HOME", "LANG", "PYTHONPATH"}
         safe_env = {
-            k: v
-            for k, v in os.environ.items()
-            if k.upper()
-            not in {"DEEPSEEK_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"}
+            k: v for k, v in os.environ.items() if k in ALLOWED_ENV_VARS
         }
         # Run docker command with sanitized environment
         p = subprocess.run(

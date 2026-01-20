@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RFSN Controller | Command Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        rfsn: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9', // Sky blue
+                            600: '#0284c7',
+                            900: '#0c4a6e',
+                            950: '#082f49', // Deep dark blue
+                        },
+                        neon: {
+                            purple: '#a855f7',
+                            green: '#22c55e',
+                            red: '#ef4444'
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', "Liberation Mono", "Courier New", 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar for console */
+        .console-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        .console-scroll::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        .console-scroll::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        pre { margin: 0; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans antialiased overflow-hidden flex flex-col">
+
+    <div id="app" class="flex flex-col h-screen">
+        <!-- Header -->
+        <header class="glass-panel border-b border-slate-700 h-16 flex items-center justify-between px-6 shrink-0 z-50">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded bg-gradient-to-br from-rfsn-500 to-neon-purple flex items-center justify-center font-bold text-white shadow-lg shadow-rfsn-500/20">R</div>
+                <h1 class="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">RFSN <span class="font-light text-slate-500">CONTROLLER</span></h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <div :class="{'bg-green-500/10 text-green-400 border-green-500/20': wsConnected, 'bg-red-500/10 text-red-400 border-red-500/20': !wsConnected}" class="px-3 py-1 rounded-full text-xs font-medium border flex items-center gap-2">
+                    <div :class="{'bg-green-500': wsConnected, 'bg-red-500': !wsConnected}" class="w-2 h-2 rounded-full animate-pulse"></div>
+                    {{ wsConnected ? 'CONNECTED' : 'OFFLINE' }}
+                </div>
+                <button @click="showConfig = !showConfig" class="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Layout -->
+        <div class="flex flex-1 overflow-hidden relative">
+            
+            <!-- Config Modal/Drawer -->
+            <transition enter-active-class="transition duration-300 ease-out" enter-from-class="transform translate-x-full" enter-to-class="transform translate-x-0" leave-active-class="transition duration-200 ease-in" leave-from-class="transform translate-x-0" leave-to-class="transform translate-x-full">
+                <div v-if="showConfig" class="absolute right-0 top-0 bottom-0 w-96 bg-slate-900/95 backdrop-blur border-l border-slate-700 shadow-2xl z-40 p-6 flex flex-col">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-rfsn-500 to-white">API Keys</h2>
+                        <button @click="showConfig = false" class="text-slate-400 hover:text-white">&times;</button>
+                    </div>
+                    
+                    <div class="flex-1 space-y-4">
+                        <div v-for="(val, key) in config" :key="key">
+                            <label class="block text-xs uppercase font-bold text-slate-500 mb-1 tracking-wider">{{ formatKey(key) }}</label>
+                            <div class="relative">
+                                <input 
+                                    type="text" 
+                                    v-model="configForm[key]" 
+                                    :placeholder="val || 'Not Set'" 
+                                    class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm text-white focus:ring-2 focus:ring-rfsn-500 focus:border-rfsn-500 outline-none transition-all placeholder-slate-600 font-mono"
+                                >
+                                <div v-if="val && !configForm[key]" class="absolute right-3 top-2.5 text-green-500 text-xs flex items-center gap-1">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                    Configured
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-4 border-t border-slate-800">
+                        <button 
+                            @click="saveConfig" 
+                            :disabled="saving"
+                            class="w-full bg-gradient-to-r from-rfsn-600 to-rfsn-500 hover:from-rfsn-500 hover:to-rfsn-400 text-white font-bold py-2.5 rounded-lg shadow-lg shadow-rfsn-500/20 transition-all transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                            <span v-if="saving" class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
+                            {{ saving ? 'Saving...' : 'Save Configuration' }}
+                        </button>
+                    </div>
+                </div>
+            </transition>
+
+            <!-- Dashboard Content -->
+            <div class="flex-1 flex flex-col md:flex-row overflow-hidden">
+                
+                <!-- Left Panel: Status & Metrics -->
+                <div class="w-full md:w-80 border-r border-slate-800 bg-slate-900/50 flex flex-col overflow-y-auto shrink-0">
+                    <!-- Status Card -->
+                    <div class="p-6 border-b border-slate-800">
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Run Status</div>
+                        
+                        <div class="flex items-baseline gap-2 mb-2">
+                            <span class="text-3xl font-black text-white">{{ stats.phase || 'IDLE' }}</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-sm text-slate-400 mb-6 font-mono">
+                            <span class="w-2 h-2 rounded-full" :class="statusColor"></span>
+                            {{ stats.runId ? shortId(stats.runId) : 'No Active Run' }}
+                        </div>
+
+                        <div class="space-y-4">
+                            <!-- Progress Bar -->
+                            <div>
+                                <div class="flex justify-between text-xs text-slate-400 mb-1">
+                                    <span>Steps</span>
+                                    <span>{{ stats.step }}/{{ stats.maxSteps || '?' }}</span>
+                                </div>
+                                <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                    <div class="h-full bg-rfsn-500 rounded-full transition-all duration-500 ease-out" :style="{ width: progressPercent + '%' }"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Metrics Grid -->
+                    <div class="p-6 grid grid-cols-1 gap-4">
+                        <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                            <div class="text-xs text-slate-500 mb-1">Patches Tried</div>
+                            <div class="text-2xl font-bold text-white">{{ stats.patchesTried }}</div>
+                        </div>
+                        <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                            <div class="text-xs text-slate-500 mb-1">Success Rate</div>
+                            <div class="text-2xl font-bold" :class="successRateColor">{{ stats.successRate }}%</div>
+                        </div>
+                        <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+                            <div class="text-xs text-slate-500 mb-1">Cost (Est.)</div>
+                            <div class="text-2xl font-bold text-emerald-400">${{ stats.cost.toFixed(4) }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Console Log -->
+                <div class="flex-1 bg-[#0c0c0c] flex flex-col min-w-0 relative">
+                    <div class="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-[#0c0c0c] to-transparent z-10"></div>
+                    
+                    <div ref="consoleRef" class="flex-1 overflow-y-auto p-6 console-scroll font-mono text-xs md:text-sm space-y-1">
+                        <div v-if="logs.length === 0" class="flex items-center justify-center h-full text-slate-700 text-lg">
+                            Waiting for logs...
+                        </div>
+                        <div v-for="(log, idx) in logs" :key="idx" class="break-words leading-relaxed animate-fade-in">
+                            <span class="text-slate-600 mr-2 select-none">[{{ log.time }}]</span>
+                            <span :class="logClass(log.type)" v-html="highlightLog(log.msg)"></span>
+                        </div>
+                    </div>
+
+                    <!-- Input Area (Future use for interactive commands) -->
+                    <div class="h-12 border-t border-slate-800 bg-slate-900 flex items-center px-4 shrink-0">
+                        <span class="text-rfsn-500 mr-2 font-bold">❯</span>
+                        <input type="text" placeholder="Controller commands disabled in view-only mode" disabled class="bg-transparent w-full outline-none text-slate-500 text-sm font-mono cursor-not-allowed">
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, computed, watch, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                // State
+                const wsConnected = ref(false);
+                const showConfig = ref(false);
+                const saving = ref(false);
+                const logs = ref([]);
+                const consoleRef = ref(null);
+                
+                const stats = ref({
+                    phase: 'READY',
+                    step: 0,
+                    maxSteps: 0,
+                    runId: null,
+                    patchesTried: 0,
+                    successRate: 0,
+                    cost: 0.0
+                });
+
+                const config = ref({});
+                const configForm = ref({});
+
+                // Computed
+                const progressPercent = computed(() => {
+                    if (!stats.value.maxSteps) return 0;
+                    return Math.min(100, (stats.value.step / stats.value.maxSteps) * 100);
+                });
+
+                const statusColor = computed(() => {
+                    if (stats.value.phase === 'ERROR') return 'bg-red-500';
+                    if (stats.value.phase === 'SUCCESS') return 'bg-green-500';
+                    if (stats.value.phase === 'READY') return 'bg-slate-500';
+                    return 'bg-rfsn-500 animate-pulse';
+                });
+
+                const successRateColor = computed(() => {
+                    if (stats.value.successRate >= 80) return 'text-green-400';
+                    if (stats.value.successRate >= 50) return 'text-yellow-400';
+                    return 'text-red-400';
+                });
+
+                // Methods
+                const formatKey = (key) => key.replace(/_/g, ' ');
+                const shortId = (id) => id.substring(0, 8);
+                
+                const logClass = (type) => {
+                    switch(type) {
+                        case 'error': return 'text-red-400';
+                        case 'success': return 'text-green-400';
+                        case 'warning': return 'text-yellow-400';
+                        case 'info': return 'text-blue-300';
+                        default: return 'text-slate-300';
+                    }
+                };
+
+                const highlightLog = (msg) => {
+                    // Simple highlighting for common patterns
+                    return msg
+                        .replace(/\[(.*?)\]/g, '<span class="text-slate-500">[$1]</span>')
+                        .replace(/'(.*?)'/g, '<span class="text-yellow-200">\'$1\'</span>');
+                };
+
+                const fetchConfig = async () => {
+                    try {
+                        const res = await fetch('/api/config');
+                        const data = await res.json();
+                        config.value = data;
+                        // Don't auto-fill form with masked values
+                    } catch (e) {
+                        console.error("Config fetch error", e);
+                    }
+                };
+
+                const saveConfig = async () => {
+                    saving.value = true;
+                    try {
+                        await fetch('/api/config', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(configForm.value)
+                        });
+                        // Clear form and reload
+                        configForm.value = {};
+                        await fetchConfig();
+                        showConfig.value = false;
+                        // Add system log
+                        addLog('success', 'Configuration updated successfully');
+                    } catch (e) {
+                        addLog('error', 'Failed to save configuration');
+                    } finally {
+                        saving.value = false;
+                    }
+                };
+
+                const addLog = (type, msg) => {
+                    const now = new Date().toLocaleTimeString('en-US', {hour12: false});
+                    logs.value.push({ time: now, type, msg });
+                    if (logs.value.length > 1000) logs.value.shift();
+                    
+                    nextTick(() => {
+                        if (consoleRef.value) {
+                            consoleRef.value.scrollTop = consoleRef.value.scrollHeight;
+                        }
+                    });
+                };
+
+                // WebSocket
+                let ws = null;
+                const connectWs = () => {
+                    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                    ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
+                    
+                    ws.onopen = () => {
+                        wsConnected.value = true;
+                        addLog('info', 'Connected to Controller Dashboard');
+                    };
+                    
+                    ws.onclose = () => {
+                        wsConnected.value = false;
+                        addLog('warning', 'Disconnected. Reconnecting...');
+                        setTimeout(connectWs, 3000);
+                    };
+
+                    ws.onmessage = (event) => {
+                        try {
+                            const payload = JSON.parse(event.data);
+                            handleEvent(payload);
+                        } catch (e) {
+                            console.error("Parse error", e);
+                        }
+                    };
+                };
+
+                const handleEvent = (event) => {
+                    const { type, data, run_id } = event;
+                    if (run_id) stats.value.runId = run_id;
+
+                    switch (type) {
+                        case 'log':
+                            addLog(data.level || 'info', data.message);
+                            break;
+                        case 'status':
+                            if (data.phase) stats.value.phase = data.phase;
+                            if (data.step !== undefined) stats.value.step = data.step;
+                            if (data.max_steps !== undefined) stats.value.maxSteps = data.max_steps;
+                            break;
+                        case 'metric':
+                            if (data.patches_tried) stats.value.patchesTried = data.patches_tried;
+                            if (data.success_rate) stats.value.successRate = data.success_rate;
+                            if (data.cost_est) stats.value.cost = data.cost_est;
+                            break;
+                    }
+                };
+
+                onMounted(() => {
+                    fetchConfig();
+                    connectWs();
+                    
+                    // Initial helpful log
+                    addLog('info', 'Dashboard initialized. Waiting for controller activity...');
+                });
+
+                return {
+                    wsConnected,
+                    showConfig,
+                    saving,
+                    logs,
+                    consoleRef,
+                    stats,
+                    config,
+                    configForm,
+                    progressPercent,
+                    statusColor,
+                    successRateColor,
+                    formatKey,
+                    shortId,
+                    logClass,
+                    highlightLog,
+                    saveConfig
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

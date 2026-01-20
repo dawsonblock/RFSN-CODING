@@ -37,7 +37,7 @@ DEFAULT_TIMEOUT = 120.0  # 2 minutes
 
 
 # ============================================================================
-# ASYNC DEEPSEEK CLIENT
+# ASYNC LLM CLIENTS
 # ============================================================================
 
 @dataclass
@@ -57,6 +57,8 @@ class AsyncLLMResponse:
         try:
             return json.loads(self.content)
         except json.JSONDecodeError:
+            # If content is empty or invalid, try to reconstruct from dictionary if it was already parsed
+            # (The underlying call_model_async might return a dict directly)
             return {"mode": "error", "error": "Invalid JSON", "raw": self.content}
 
 
@@ -68,74 +70,96 @@ async def call_deepseek_async(
     system_prompt: Optional[str] = None,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> AsyncLLMResponse:
-    """Call DeepSeek API asynchronously.
+    """Delegate to llm_deepseek.call_model_async."""
+    from .llm_deepseek import call_model_async as ds_call
     
-    Args:
-        prompt: User prompt.
-        temperature: Sampling temperature.
-        model: Model name.
-        system_prompt: Optional system prompt.
-        timeout: Request timeout in seconds.
-        
-    Returns:
-        AsyncLLMResponse with parsed content.
-    """
-    if not HTTPX_AVAILABLE:
-        raise RuntimeError("httpx not installed. Run: pip install httpx")
-    
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
-        # Return mock response
-        return AsyncLLMResponse(
-            content='{"mode": "tool_request", "requests": [], "why": "Mocked - no API key"}',
-            model=model,
-            temperature=temperature,
-            cached=False,
-        )
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
-    
-    body = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "response_format": {"type": "json_object"},
-    }
-    
-    start_time = time.time()
-    
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            f"{DEEPSEEK_BASE_URL}/chat/completions",
-            headers=headers,
-            json=body,
-        )
-        response.raise_for_status()
-        data = response.json()
-    
-    latency_ms = (time.time() - start_time) * 1000
-    
-    content = data["choices"][0]["message"]["content"]
-    usage = data.get("usage", {})
+    start = time.time()
+    try:
+        # Note: system_prompt is currently hardcoded in llm_deepseek but we can adapt if needed
+        # The prompt construction happens before this usually.
+        result = await ds_call(prompt, temperature)
+        content = json.dumps(result)
+    except Exception as e:
+        content = json.dumps({"mode": "error", "error": str(e)})
+
+    latency_ms = (time.time() - start) * 1000
     
     return AsyncLLMResponse(
         content=content,
         model=model,
         temperature=temperature,
-        prompt_tokens=usage.get("prompt_tokens", 0),
-        completion_tokens=usage.get("completion_tokens", 0),
         latency_ms=latency_ms,
-        cached=False,
     )
 
+async def call_gemini_async(
+    prompt: str,
+    *,
+    temperature: float = 0.0,
+    model: str = "gemini-2.0-flash",
+    system_prompt: Optional[str] = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> AsyncLLMResponse:
+    """Delegate to llm_gemini.call_model_async."""
+    from .llm_gemini import call_model_async as gem_call
+    
+    start = time.time()
+    try:
+        result = await gem_call(prompt, temperature)
+        content = json.dumps(result)
+    except Exception as e:
+        content = json.dumps({"mode": "error", "error": str(e)})
+
+    latency_ms = (time.time() - start) * 1000
+    
+    return AsyncLLMResponse(
+        content=content,
+        model=model,
+        temperature=temperature,
+        latency_ms=latency_ms,
+    )
+
+
+# Global cache instance
+_cache_instance: Optional["LLMCache"] = None
+
+
+def get_cache(db_path: Optional[str] = None) -> "LLMCache":
+    """Get the global LLM cache instance."""
+    global _cache_instance
+    if _cache_instance is None:
+        cache_path = db_path or os.path.join(os.path.dirname(__file__), "llm_cache.db")
+        _cache_instance = LLMCache(db_path=cache_path)
+    return _cache_instance
+
+
+async def call_deepseek_cached(
+    prompt: str,
+    *,
+    temperature: float = 0.0,
+    model: str = "deepseek-chat",
+    system_prompt: Optional[str] = None,
+    use_cache: bool = True,
+    cache: Optional["LLMCache"] = None,
+) -> AsyncLLMResponse:
+    """Call DeepSeek with caching support."""
+    if use_cache:
+        cache = cache or get_cache()
+        cached = cache.get(prompt, model, temperature)
+        if cached is not None:
+            return cached
+    
+    response = await call_deepseek_async(
+        prompt,
+        temperature=temperature,
+        model=model,
+        system_prompt=system_prompt,
+    )
+    
+    if use_cache and cache and not response.cached:
+        if response.content:
+            cache.set(prompt, model, temperature, response.content)
+    
+    return response
 
 async def call_deepseek_streaming(
     prompt: str,
@@ -143,59 +167,55 @@ async def call_deepseek_streaming(
     temperature: float = 0.0,
     model: str = "deepseek-chat",
     system_prompt: Optional[str] = None,
-    timeout: float = DEFAULT_TIMEOUT,
 ) -> AsyncIterator[str]:
-    """Call DeepSeek API with streaming response.
+    """Delegate to llm_deepseek.call_model_streaming."""
+    from .llm_deepseek import call_model_streaming as ds_stream
     
-    Yields:
-        Chunks of the response as they arrive.
-    """
-    if not HTTPX_AVAILABLE:
-        raise RuntimeError("httpx not installed. Run: pip install httpx")
+    async for chunk in ds_stream(prompt, temperature):
+        yield chunk
+
+async def call_gemini_streaming(
+    prompt: str,
+    *,
+    temperature: float = 0.0,
+    model: str = "gemini-2.0-flash",
+    system_prompt: Optional[str] = None,
+) -> AsyncIterator[str]:
+    """Delegate to llm_gemini.call_model_streaming."""
+    from .llm_gemini import call_model_streaming as gem_stream
     
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
-        yield '{"mode": "tool_request", "requests": [], "why": "Mocked - no API key"}'
-        return
+    async for chunk in gem_stream(prompt, temperature):
+        yield chunk
+
+
+async def call_gemini_cached(
+    prompt: str,
+    *,
+    temperature: float = 0.0,
+    model: str = "gemini-2.0-flash",
+    system_prompt: Optional[str] = None,
+    use_cache: bool = True,
+    cache: Optional["LLMCache"] = None,
+) -> AsyncLLMResponse:
+    """Call Gemini with caching support."""
+    if use_cache:
+        cache = cache or get_cache()
+        cached = cache.get(prompt, model, temperature)
+        if cached is not None:
+            return cached
     
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    response = await call_gemini_async(
+        prompt,
+        temperature=temperature,
+        model=model,
+        system_prompt=system_prompt,
+    )
     
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+    if use_cache and cache and not response.cached:
+        if response.content: # Only cache valid content
+            cache.set(prompt, model, temperature, response.content)
     
-    body = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "stream": True,
-    }
-    
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(
-            "POST",
-            f"{DEEPSEEK_BASE_URL}/chat/completions",
-            headers=headers,
-            json=body,
-        ) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        data = json.loads(data_str)
-                        delta = data["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
-                    except json.JSONDecodeError:
-                        continue
+    return response
 
 
 # ============================================================================
@@ -208,6 +228,7 @@ async def call_parallel(
     model: str = "deepseek-chat",
     system_prompt: Optional[str] = None,
     timeout: float = DEFAULT_TIMEOUT,
+    use_cache: bool = True,
 ) -> List[AsyncLLMResponse]:
     """Call LLM with multiple prompts/temperatures in parallel.
     
@@ -216,21 +237,30 @@ async def call_parallel(
         model: Model to use.
         system_prompt: Optional system prompt.
         timeout: Request timeout.
+        use_cache: Whether to use semantic caching.
         
     Returns:
         List of responses in same order as input.
     """
-    tasks = [
-        call_deepseek_async(
-            prompt,
-            temperature=temp,
-            model=model,
-            system_prompt=system_prompt,
-            timeout=timeout,
-        )
-        for prompt, temp in prompts
-    ]
-    
+    tasks = []
+    for prompt, temp in prompts:
+        if "deepseek" in model:
+            tasks.append(call_deepseek_cached(
+                prompt, 
+                temperature=temp, 
+                model=model, 
+                system_prompt=system_prompt, 
+                use_cache=use_cache
+            ))
+        else:
+            tasks.append(call_gemini_cached(
+                prompt, 
+                temperature=temp, 
+                model=model, 
+                system_prompt=system_prompt, 
+                use_cache=use_cache
+            ))
+            
     return await asyncio.gather(*tasks, return_exceptions=True)
 
 
@@ -241,19 +271,9 @@ async def generate_patches_parallel(
     model: str = "deepseek-chat",
     system_prompt: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Generate patches at multiple temperatures in parallel.
-    
-    Args:
-        prompt: The patch generation prompt.
-        temperatures: List of temperatures to try.
-        model: Model to use.
-        system_prompt: Optional system prompt.
-        
-    Returns:
-        List of parsed patch responses.
-    """
+    """Generate patches at multiple temperatures in parallel."""
     if temperatures is None:
-        temperatures = [0.0, 0.2, 0.4]
+        temperatures = [0.0, 0.4, 0.8] # Increased variance
     
     prompts = [(prompt, temp) for temp in temperatures]
     responses = await call_parallel(
@@ -266,8 +286,10 @@ async def generate_patches_parallel(
     for resp in responses:
         if isinstance(resp, Exception):
             patches.append({"mode": "error", "error": str(resp)})
+        elif hasattr(resp, "to_dict"):
+             patches.append(resp.to_dict())
         else:
-            patches.append(resp.to_dict())
+             patches.append({"mode": "error", "error": "Unknown response type"})
     
     return patches
 
@@ -472,74 +494,7 @@ class LLMCache:
         }
 
 
-# ============================================================================
-# CACHED ASYNC CLIENT
-# ============================================================================
 
-_default_cache: Optional[LLMCache] = None
-
-
-def get_cache(db_path: Optional[str] = None) -> LLMCache:
-    """Get or create the default LLM cache.
-    
-    Args:
-        db_path: Path to cache database. Uses default if None.
-        
-    Returns:
-        LLMCache instance.
-    """
-    global _default_cache
-    
-    if _default_cache is None:
-        cache_path = db_path or os.path.expanduser("~/.rfsn/llm_cache.db")
-        _default_cache = LLMCache(db_path=cache_path)
-    
-    return _default_cache
-
-
-async def call_deepseek_cached(
-    prompt: str,
-    *,
-    temperature: float = 0.0,
-    model: str = "deepseek-chat",
-    system_prompt: Optional[str] = None,
-    use_cache: bool = True,
-    cache: Optional[LLMCache] = None,
-) -> AsyncLLMResponse:
-    """Call DeepSeek with caching support.
-    
-    Args:
-        prompt: User prompt.
-        temperature: Sampling temperature.
-        model: Model name.
-        system_prompt: Optional system prompt.
-        use_cache: Whether to use caching.
-        cache: Cache instance (uses default if None).
-        
-    Returns:
-        AsyncLLMResponse (may be from cache).
-    """
-    if use_cache:
-        cache = cache or get_cache()
-        
-        # Check cache
-        cached = cache.get(prompt, model, temperature)
-        if cached is not None:
-            return cached
-    
-    # Make actual API call
-    response = await call_deepseek_async(
-        prompt,
-        temperature=temperature,
-        model=model,
-        system_prompt=system_prompt,
-    )
-    
-    # Cache the response
-    if use_cache and cache and not response.cached:
-        cache.set(prompt, model, temperature, response.content)
-    
-    return response
 
 
 # ============================================================================

@@ -155,6 +155,24 @@ class SysdepsInstaller:
                     error_message=f"apt-get update failed: {result.stderr}",
                 )
 
+            # Validate package names strictly to prevent injection
+            PKG_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9\-+.]+$")
+            validated_packages = []
+            for pkg in packages:
+                if PKG_NAME_RE.match(pkg):
+                    validated_packages.append(pkg)
+                else:
+                    # Log security warning (in a real system this would be logged to security audit)
+                    print(f"SECURITY WARNING: Rejected invalid package name: {pkg}")
+            
+            if not validated_packages:
+                 return SysdepsResult(
+                    success=True, # Nothing valid to install is technically a success (no-op)
+                    installed_packages=[],
+                    blocked_packages=blocked + [p for p in packages if p not in validated_packages],
+                    error_message=None,
+                )
+
             # Install packages
             install_cmd = [
                 "apt-get",
@@ -162,7 +180,8 @@ class SysdepsInstaller:
                 "-y",
                 "--no-install-recommends",
                 "-qq",
-            ] + packages
+                "--",  # End of options, strictly positional arguments follow
+            ] + validated_packages
 
             result = subprocess.run(
                 install_cmd,

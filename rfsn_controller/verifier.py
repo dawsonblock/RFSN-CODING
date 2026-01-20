@@ -249,6 +249,12 @@ class Verifier:
             failing_tests = parse_pytest_failures(out)
             sig = error_signature(stdout, stderr)
 
+        # Validate verification integrity check (Fail-Closed)
+        # If the verifier detected a security violation/blocking, we must abort, 
+        # not just mark as failed test.
+        if "Command blocked by security policy" in stderr or "Security Violation" in stderr:
+             raise RuntimeError(f"Fail-Closed: Security violation detected during verification ({predicate_name}). Session aborted.")
+
         return VerifyResult(
             ok=ok,
             exit_code=exit_code,

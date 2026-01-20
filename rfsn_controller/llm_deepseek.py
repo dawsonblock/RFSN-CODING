@@ -13,9 +13,9 @@ def _ensure_openai_imported():
     global _openai
     if _openai is None:
         try:
-            from openai import OpenAI
+            from openai import OpenAI, AsyncOpenAI
 
-            _openai = OpenAI
+            _openai = (OpenAI, AsyncOpenAI)
         except ImportError as e:
             # Raise a clear error instructing users to install optional LLM dependencies.
             raise RuntimeError(
@@ -221,7 +221,35 @@ You are a bounded coding agent. Act through evidence, minimal diffs, and verific
 """.strip()
 
 _client = None  # cached client instance
+_async_client = None # cached async client instance
 
+class MockClient:
+    class chat:
+        class completions:
+            @staticmethod
+            def create(*args, **kwargs):
+                class Message:
+                    content = '{"mode": "tool_request", "requests": [], "why": "Mocked response because API key is missing."}'
+                class Choice:
+                    message = Message()
+                class Response:
+                    choices = [Choice()]
+                    usage = None
+                return Response()
+
+class AsyncMockClient:
+    class chat:
+        class completions:
+            @staticmethod
+            async def create(*args, **kwargs):
+                class Message:
+                    content = '{"mode": "tool_request", "requests": [], "why": "Mocked async response"}'
+                class Choice:
+                    message = Message()
+                class Response:
+                    choices = [Choice()]
+                    usage = None
+                return Response()
 
 def client():
     """Return a singleton DeepSeek client, reading API key from env.
@@ -231,33 +259,27 @@ def client():
     """
     global _client
     if _client is None:
-        try:
-            OpenAI = _ensure_openai_imported()
-        except RuntimeError:
-             OpenAI = None
+        OpenAI, _ = _ensure_openai_imported()
 
         key = os.environ.get("DEEPSEEK_API_KEY")
         if not key:
             print("Warning: DEEPSEEK_API_KEY not found. Using Mock Client.")
-            class MockClient:
-                class chat:
-                    class completions:
-                        @staticmethod
-                        def create(*args, **kwargs):
-                            class Message:
-                                content = (
-                                    '{"mode": "tool_request", "requests": [], '
-                                    '"why": "Mocked response because API key is missing."}'
-                                )
-                            class Choice:
-                                message = Message()
-                            class Response:
-                                choices = [Choice()]
-                            return Response()
             _client = MockClient()
         else:
             _client = OpenAI(api_key=key, base_url="https://api.deepseek.com")
     return _client
+
+def async_client():
+    """Return a singleton Async DeepSeek client."""
+    global _async_client
+    if _async_client is None:
+        _, AsyncOpenAI = _ensure_openai_imported()
+        key = os.environ.get("DEEPSEEK_API_KEY")
+        if not key:
+            _async_client = AsyncMockClient()
+        else:
+            _async_client = AsyncOpenAI(api_key=key, base_url="https://api.deepseek.com")
+    return _async_client
 
 
 def call_model(model_input: str, temperature: float = 0.0) -> dict:
@@ -340,4 +362,101 @@ def call_model(model_input: str, temperature: float = 0.0) -> dict:
     
     # Should never reach here
     raise last_exception if last_exception else RuntimeError("Unknown error")
+
+
+async def call_model_async(model_input: str, temperature: float = 0.0) -> dict:
+    """Async version of call_model."""
+    import time
+    import asyncio
+    
+    _ensure_openai_imported()
+
+    max_retries = 3
+    base_delay = 1.0
+    last_exception = None
+    
+    for attempt in range(max_retries + 1):
+        start_time = time.time()
+        try:
+            resp = await async_client().chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": model_input},
+                ],
+                temperature=temperature,
+                response_format={"type": "json_object"},
+            )
+
+            content = resp.choices[0].message.content
+            result = json.loads(content)
+            
+            latency_sec = time.time() - start_time
+            try:
+                from .telemetry import track_llm_call
+                prompt_tokens = getattr(resp.usage, 'prompt_tokens', 0) if hasattr(resp, 'usage') else 0
+                completion_tokens = getattr(resp.usage, 'completion_tokens', 0) if hasattr(resp, 'usage') else 0
+                track_llm_call(
+                    model=MODEL,
+                    status="success",
+                    latency_sec=latency_sec,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
+            except ImportError:
+                pass
+            
+            return result
+            
+        except Exception as e:
+            last_exception = e
+            latency_sec = time.time() - start_time
+            try:
+                from .telemetry import track_llm_call
+                track_llm_call(
+                    model=MODEL,
+                    status="error",
+                    latency_sec=latency_sec,
+                )
+            except ImportError:
+                pass
+            
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                await asyncio.sleep(delay)
+            else:
+                raise last_exception from last_exception
+    
+    raise last_exception if last_exception else RuntimeError("Unknown error")
+
+
+async def call_model_streaming(model_input: str, temperature: float = 0.0):
+    """Call the DeepSeek model with streaming response.
+    
+    Yields:
+        Chunks of the response content as they arrive.
+    """
+    _ensure_openai_imported()
+
+    try:
+        stream = await async_client().chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": model_input},
+            ],
+            temperature=temperature,
+            stream=True,
+            response_format={"type": "json_object"},
+        )
+
+        async for chunk in stream:
+            content = chunk.choices[0].delta.content or ""
+            if content:
+                yield content
+                
+    except Exception as e:
+        raise e
+
+
 

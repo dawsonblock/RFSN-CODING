@@ -26,6 +26,7 @@ from .action_outcome_memory import (
     make_context_signature,
     score_action,
 )
+from .broadcaster import ProgressBroadcaster
 from .apt_whitelist import AptTier, AptWhitelist
 from .buildpacks import (
     BuildpackContext,
@@ -56,6 +57,7 @@ from .sandbox import (
     create_sandbox,
     create_venv,
     docker_install,
+    docker_run,
     docker_test,
     drop_worktree,
     find_local_module,
@@ -79,7 +81,16 @@ from .url_validation import validate_github_url
 from .verifier import VerifyResult, run_tests
 
 
-def get_model_client(model_name: str):
+def _truncate(s: str, limit: int) -> str:
+    """Truncate string to limit."""
+    if not s:
+        return ""
+    if len(s) <= limit:
+        return s
+    return s[:limit] + "...[truncated]"
+
+
+def get_model_client(model_name: str) -> Any:
     """Get the appropriate model client based on model name."""
     if model_name.startswith("deepseek"):
         return call_deepseek
@@ -222,6 +233,25 @@ def _execute_tool(sb: Sandbox, tool: str, args: Dict[str, Any]) -> Dict[str, Any
         return find_local_module(sb, args.get("module_name", ""))
     if tool == "sandbox.set_pythonpath":
         return set_pythonpath(sb, args.get("path", ""))
+    if tool == "sandbox.run_command":
+        try:
+            timeout = int(args.get("timeout_sec", 120))
+        except (ValueError, TypeError):
+            timeout = 120
+        # Check command allowlist internally in docker_run/runner if needed,
+        # but here we allow general execution subject to container security.
+        # Commands are run as the sandbox user.
+        cmd = args.get("command", "")
+        if isinstance(cmd, list):
+            cmd = " ".join(str(c) for c in cmd)
+        res = docker_run(sb, str(cmd), timeout_sec=timeout)
+        return {
+            "ok": res.ok,
+            "exit_code": res.exit_code,
+            "stdout": res.stdout,
+            "stderr": res.stderr,
+            "timed_out": res.timed_out,
+        }
     return {"ok": False, "error": f"Unknown tool: {tool}"}
 
 
@@ -520,6 +550,11 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             }
         )
         log({"phase": "init", "cfg": cfg.__dict__})
+
+        # Initialize Broadcaster
+        broadcaster = ProgressBroadcaster(run_id=run_id)
+        broadcaster.log(f"Run {run_id} started", level="info")
+        broadcaster.status("INGEST")
 
         if cfg.learning_db_path:
             db_path = os.path.expanduser(cfg.learning_db_path)
@@ -1350,8 +1385,34 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             winner: Any = None
             patches_to_evaluate: List[Tuple[str, float]] = []
             call_model = get_model_client(cfg.model)
-            for t in cfg.temps:
-                resp = call_model(model_input, temperature=t)
+            
+            # Pre-fetch responses in parallel if enabled
+            parallel_responses = []
+            if cfg.parallel_patches:
+                try:
+                    import asyncio
+                    from .llm_async import generate_patches_parallel
+                    print(f"[Step {step_count}] Generating parallel responses (temps={cfg.temps})...")
+                    parallel_responses = asyncio.run(
+                        generate_patches_parallel(
+                            model_input,
+                            temperatures=cfg.temps,
+                            model=cfg.model
+                        )
+                    )
+                except Exception as e:
+                    print(f"Parallel generation failed: {e}. Falling back to sync.")
+                    parallel_responses = []
+
+            for i, t in enumerate(cfg.temps):
+                if i < len(parallel_responses):
+                    resp = parallel_responses[i]
+                    if resp.get("mode") == "error":
+                         # Fallback to sync call on error
+                         resp = call_model(model_input, temperature=t)
+                else:
+                    resp = call_model(model_input, temperature=t)
+                    
                 log({"phase": "model", "step": step_count, "temp": t, "resp": resp})
 
                 mode = resp.get("mode")
@@ -1408,7 +1469,9 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         if stderr:
                             summary += f"Stderr: {stderr}\n"
                         if tool == "sandbox.read_file" and tr.get("ok"):
-                            summary += "[File content read successfully]\n"
+                            content = tr.get("content", "")
+                            summary += f"\n[File Content: {len(content)} bytes]\n"
+                            summary += _truncate(content, 2000) + "\n"
                         if tool == "sandbox.grep" and tr.get("ok"):
                             matches = tr.get("matches", [])
                             if matches:
@@ -1778,6 +1841,8 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             # Track verification results
             verification_passed = True
             verification_results = []
+            
+            broadcaster.status("FINAL_VERIFY", step=step_count)
 
             # Execute verification commands based on policy
             run_cmd_verification = cfg.verify_policy in ("cmds_then_tests", "cmds_only")
@@ -1997,8 +2062,12 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
             if verification_passed:
                 print("\n✅ FINAL SUCCESS! All verifications passed.")
+                broadcaster.log("Run completed successfully", level="success")
+                broadcaster.status("SUCCESS")
             else:
                 print("\n⚠️  Final verify failed")
+                broadcaster.log("Run failed verification", level="error")
+                broadcaster.status("FAILURE")
                 current_phase = Phase.BAILOUT
 
         # === PHASE: EVIDENCE_PACK ===
@@ -2111,6 +2180,8 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         }
 
     finally:
+        if 'broadcaster' in locals():
+            broadcaster.close()
         if memory_store is not None:
             memory_store.close()
 

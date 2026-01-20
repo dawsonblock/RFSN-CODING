@@ -28,21 +28,14 @@ class ToolRequest:
 
     def signature(self) -> str:
         """Generate a unique signature for this request."""
-        # Create a deterministic string representation
-        parts = [self.tool]
-        for key in sorted(self.args.keys()):
-            value = self.args[key]
-            if isinstance(value, (str, int, float, bool, type(None))):
-                parts.append(f"{key}:{value}")
-            elif isinstance(value, (dict, list)):
-                # Use json.dumps with sorted keys for deterministic hashing
-                parts.append(f"{key}:{json.dumps(value, sort_keys=True)}")
-            else:
-                # For other complex types, use string representation
-                parts.append(f"{key}:{str(value)}")
-
-        signature_str = "|".join(parts)
-        return hashlib.md5(signature_str.encode()).hexdigest()
+        # Use a stable, recursive JSON representation for the entire payload
+        # This ensures that {'a':1, 'b':2} and {'b':2, 'a':1} hash identically
+        stable_json = json.dumps(
+            {"tool": self.tool, "args": self.args}, 
+            sort_keys=True, 
+            default=str  # Fallback for non-serializable types
+        )
+        return hashlib.sha256(stable_json.encode()).hexdigest()
 
 
 class ToolRequestManager:

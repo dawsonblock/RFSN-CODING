@@ -100,6 +100,38 @@ class Buildpack:
         """Initialize the buildpack."""
         self._buildpack_type = BuildpackType.UNKNOWN
 
+    def _validate_step(self, step: Step) -> Step:
+        """Validate that a step's command is allowed by the security policy.
+        
+        Args:
+            step: The step to validate.
+            
+        Returns:
+            The validated step.
+            
+        Raises:
+            RuntimeError: If the command is not allowed.
+        """
+        # Import here to avoid circular dependencies if any
+        from rfsn_controller.command_allowlist import is_command_allowed
+        
+        cmd_str = " ".join(step.argv)
+        allowed, reason = is_command_allowed(cmd_str)
+        if not allowed:
+            raise RuntimeError(f"Security Violation: Buildpack generated forbidden command: {reason}")
+        return step
+
+    def get_safe_install_plan(self, ctx: BuildpackContext) -> List[Step]:
+        """Get validated installation steps.
+        
+        Args:
+            ctx: BuildpackContext
+            
+        Returns:
+            List of safe Step objects.
+        """
+        return [self._validate_step(s) for s in self.install_plan(ctx)]
+
     @property
     def buildpack_type(self) -> BuildpackType:
         """Return the buildpack type."""
