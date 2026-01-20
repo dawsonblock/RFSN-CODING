@@ -582,15 +582,11 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 }
             )
 
-        # === ELITE CONTROLLER: Initialize Planner ===
-        elite_planner = None
-        if cfg.planner_mode == "dag":
-            try:
-                from .planner import Planner
-                elite_planner = Planner(mode="repair" if not cfg.feature_mode else "feature")
-                log({"phase": "elite_planner_init", "mode": cfg.planner_mode})
-            except ImportError as e:
-                log({"phase": "elite_planner_init", "error": str(e)})
+        # === ELITE CONTROLLER: Planner/Policy flags for later init ===
+        elite_planner = None  # Will be initialized after context is set up
+        elite_planner_enabled = cfg.planner_mode == "dag"
+        if elite_planner_enabled:
+            log({"phase": "elite_planner_init", "mode": cfg.planner_mode, "status": "deferred"})
 
         # === ELITE CONTROLLER: Initialize Policy ===
         elite_policy = None
