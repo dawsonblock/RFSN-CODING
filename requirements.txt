@@ -1,0 +1,8 @@
+# Core runtime dependencies for the RFSN controller
+#
+# This file contains only the libraries required to run the core controller and
+# sandbox offline. Optional model backends (e.g. OpenAI, Google GenAI) have
+# been moved to requirements-llm.txt so environments without internet or
+# heavy SDKs can still install and execute the controller safely.
+
+python-dotenv>=1.0.1

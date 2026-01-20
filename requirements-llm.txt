@@ -1,0 +1,9 @@
+# Optional LLM backend dependencies for the RFSN controller
+#
+# These libraries enable the controller to interact with hosted large
+# language model services. They are not required for the core controller
+# functionality and should be installed separately when needed. See
+# README.md for installation instructions.
+
+openai>=1.0.0
+google-genai>=0.7.0

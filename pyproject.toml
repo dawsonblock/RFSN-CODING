@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rfsn-controller"
+version = "0.1.0"
+description = "RFSN Sandbox Controller - Intelligent Autonomous Code Agent"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "Dawson Block", email = "dawson@example.com" },
+]
+dependencies = [
+    "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+llm = [
+    "openai>=1.0.0",
+    "google-genai>=0.7.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "types-toml>=0.10.0",
+]
+
+[project.scripts]
+rfsn = "rfsn_controller.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rfsn_controller"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --strict-markers"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests requiring network",
+]
+filterwarnings = [
+    "ignore:Using `@model_validator` with mode='after'.*:DeprecationWarning:google\\.genai\\.types",
+    "ignore:(?s).*Python version 3\\.9 past its end of life.*:FutureWarning:google\\.auth(\\.|\\$)",
+    "ignore:(?s).*Python version 3\\.9 past its end of life.*:FutureWarning:google\\.oauth2(\\.|\\$)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = ["RFSN"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = ["RFSN", "tests"]
