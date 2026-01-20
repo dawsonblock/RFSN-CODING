@@ -431,6 +431,12 @@ class ControllerConfig:
     incremental_tests: bool = False  # Run only affected tests first
     enable_telemetry: bool = False  # Enable OpenTelemetry/Prometheus
     telemetry_port: int = 8080  # Prometheus metrics port
+    # Elite Controller options
+    policy_mode: str = "off"  # off | bandit
+    planner_mode: str = "off"  # off | dag
+    repo_index: bool = False  # Enable repo indexing
+    seed: int = 1337  # Deterministic seed
+    no_eval: bool = False  # Skip final evaluation
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -575,6 +581,37 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     "max_rows": cfg.learning_max_rows,
                 }
             )
+
+        # === ELITE CONTROLLER: Initialize Planner ===
+        elite_planner = None
+        if cfg.planner_mode == "dag":
+            try:
+                from .planner import Planner
+                elite_planner = Planner(mode="repair" if not cfg.feature_mode else "feature")
+                log({"phase": "elite_planner_init", "mode": cfg.planner_mode})
+            except ImportError as e:
+                log({"phase": "elite_planner_init", "error": str(e)})
+
+        # === ELITE CONTROLLER: Initialize Policy ===
+        elite_policy = None
+        if cfg.policy_mode == "bandit":
+            try:
+                from .policy_bandit import ThompsonBandit
+                policy_db = cfg.learning_db_path.replace(".db", "_policy.db") if cfg.learning_db_path else None
+                elite_policy = ThompsonBandit(seed=cfg.seed, db_path=policy_db)
+                log({"phase": "elite_policy_init", "mode": cfg.policy_mode, "seed": cfg.seed})
+            except ImportError as e:
+                log({"phase": "elite_policy_init", "error": str(e)})
+
+        # === ELITE CONTROLLER: Initialize Repo Index ===
+        elite_repo_index = None
+        if cfg.repo_index:
+            try:
+                from .repo_index import RepoIndex
+                elite_repo_index = RepoIndex.build(sb.repo_dir)
+                log({"phase": "elite_repo_index_init", "files": len(elite_repo_index.files)})
+            except ImportError as e:
+                log({"phase": "elite_repo_index_init", "error": str(e)})
 
         # === PHASE: INGEST ===
         log(PhaseTransition(None, Phase.INGEST).to_dict())

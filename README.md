@@ -157,6 +157,25 @@ rfsn --repo URL --ensemble-mode
 rfsn --repo URL --enable-telemetry --telemetry-port 9090
 ```
 
+### 🧠 Elite Controller (New)
+
+```bash
+# Enable DAG planner for multi-step execution
+rfsn run --repo URL --planner-mode dag
+
+# Enable learning policy (Thompson Sampling)
+rfsn run --repo URL --policy-mode bandit --learning-db ./learning.db
+
+# Generate plan without execution
+rfsn plan --repo URL --problem "Fix auth bug" --out plan.json
+
+# Run evaluation only
+rfsn eval --repo URL --test "pytest -q"
+
+# Full elite mode
+rfsn run --repo URL --planner-mode dag --policy-mode bandit --repo-index --seed 42
+```
+
 ### All Options
 
 | Flag | Description |

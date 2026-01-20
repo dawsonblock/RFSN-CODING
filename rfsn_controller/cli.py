@@ -319,6 +319,35 @@ def main() -> None:
         default=8080,
         help="Port for Prometheus metrics endpoint (default: 8080)",
     )
+    # Elite Controller flags
+    parser.add_argument(
+        "--policy-mode",
+        default="off",
+        choices=["off", "bandit"],
+        help="Learning policy mode: off or bandit (Thompson Sampling)",
+    )
+    parser.add_argument(
+        "--planner-mode",
+        default="off",
+        choices=["off", "dag"],
+        help="Planner mode: off or dag (DAG-based execution)",
+    )
+    parser.add_argument(
+        "--repo-index",
+        action="store_true",
+        help="Enable repository indexing for context",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=1337,
+        help="Deterministic seed for reproducibility (default: 1337)",
+    )
+    parser.add_argument(
+        "--no-eval",
+        action="store_true",
+        help="Skip final evaluation phase",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -376,6 +405,11 @@ def main() -> None:
         incremental_tests=args.incremental_tests,
         enable_telemetry=args.enable_telemetry,
         telemetry_port=args.telemetry_port,
+        policy_mode=args.policy_mode,
+        planner_mode=args.planner_mode,
+        repo_index=args.repo_index,
+        seed=args.seed,
+        no_eval=args.no_eval,
     )
     result = run_controller(cfg)
     print(result)

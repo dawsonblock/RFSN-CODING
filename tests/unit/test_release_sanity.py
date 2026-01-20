@@ -70,7 +70,7 @@ def test_no_absolute_local_paths_in_code():
     # Allow /mnt/data which is used by the sandbox; exclude it from check
     allowed_substring = "/mnt/data"
 
-    # Directories to exclude from this check (dev artifacts)
+    # Directories to exclude from this check (dev artifacts and external deps)
     exclude_dirs = {
         ".venv",
         "results",
@@ -80,6 +80,8 @@ def test_no_absolute_local_paths_in_code():
         ".git",
         ".pytest_cache",
         "RFSN",
+        "firecracker-main",  # External dependency
+        "E2B-main",  # External dependency
     }
 
     for dirpath, dirnames, filenames in os.walk(root):
@@ -90,6 +92,12 @@ def test_no_absolute_local_paths_in_code():
             if not fname.endswith((".py", ".md", ".rst", ".txt")):
                 continue
             if fname == "test_release_sanity.py":
+                continue
+            # e2b_sandbox.py contains legitimate /home/user paths for E2B sandbox
+            if fname == "e2b_sandbox.py":
+                continue
+            # E2B_USE_CASES.md is documentation with sandbox path examples
+            if fname == "E2B_USE_CASES.md":
                 continue
             with open(os.path.join(dirpath, fname), "r", errors="ignore") as f:
                 content = f.read()
