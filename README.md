@@ -18,7 +18,6 @@
 
 ## ✨ Features
 
-<table>
 <tr>
 <td width="50%">
 
@@ -44,22 +43,43 @@
 <tr>
 <td>
 
-### 🛡️ **Secure Sandbox**
+### 🧠 **Self-Learning**
 
-- Docker isolation
-- Command allowlist
-- Escape detection
-- No credential leakage
+- **Action-Outcome Memory**: Remembers past successes/failures.
+- **Context Persistence**: Never forgets read files.
+- **Optimized Strategy**: Prioritizes proven tools over time.
+
+</td>
+<td>
+
+### 📊 **Real-Time Dashboard**
+
+- Live step-by-step visualization.
+- Secure API key management.
+- Performance metrics & cost tracking.
+- Modern dark-mode UI.
+
+</td>
+</tr>
+<tr>
+<td>
+
+### 🛡️ **Zero-Trust Security**
+
+- **Fail-Closed Verification**: Aborts on any violation.
+- **APT Injection Guard**: Blocks malicious package names.
+- **Deterministic Signatures**: Prevents tool tampering.
+- **Path Jail**: strict `../` blocking.
 
 </td>
 <td>
 
 ### ⚡ **Optimized Performance**
 
-- 3x faster with parallel LLM
-- 10x faster incremental tests
-- Smart file caching
-- Early termination heuristics
+- **3x Faster**: Parallel LLM patch generation.
+- **10x Faster**: Smart file cache & incremental tests.
+- **<1s Cold Start**: Docker pre-warming.
+- **Async Streaming**: Instant token feedback.
 
 </td>
 </tr>
@@ -87,6 +107,14 @@ pip install -e .
 
 ```bash
 export DEEPSEEK_API_KEY="your-api-key"
+```
+
+### 📊 Launch Dashboard (Optional)
+
+```bash
+# Start the real-time UI
+uvicorn rfsn_dashboard.main:app --host 127.0.0.1 --port 8000 &
+# Open http://localhost:8000
 ```
 
 ### Run Your First Repair
@@ -209,6 +237,15 @@ rfsn --repo URL --enable-telemetry --telemetry-port 9090
 │ CLI startup        │ 5s       │ 2s       │ 2.5x        │
 └────────────────────┴──────────┴──────────┴─────────────┘
 ```
+
+### 🏆 Case Study: Quicksort Solved
+
+The controller autonomously diagnosed and fixed a complex recursion bug in `QuixBugs/quicksort`.
+
+- **Bug**: Missing duplicates (`x > pivot` vs `x >= pivot`).
+- **Diagnosis**: Model read test data, identified dropped elements, and traced logic.
+- **Solution**: Patched the list comprehension in 4 steps.
+- **Key Enabler**: Context persistence and Action-Outcome Learning prevented infinite loops.
 
 ---
 
